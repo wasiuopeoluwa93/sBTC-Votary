@@ -113,3 +113,110 @@
   )
 )
 
+;; Vote on a proposal
+(define-public (vote (proposal-id uint) (vote-direction bool))
+  (let 
+    (
+      (proposal (unwrap! (map-get? proposals {proposal-id: proposal-id}) err-proposal-not-found))
+      (current-block block-height)
+      ;; Check if voter has already voted
+      (voter-vote (map-get? voter-votes {proposal-id: proposal-id, voter: tx-sender}))
+    )
+    ;; Ensure proposal-id is valid
+    (asserts! (< proposal-id (var-get next-proposal-id)) err-invalid-proposal-id)
+
+    ;; Check if voting is still open
+    (asserts! (< current-block (get voting-end proposal)) err-voting-closed)
+
+    ;; Check if proposal is not cancelled
+    (asserts! (not (get cancelled proposal)) err-proposal-not-found)
+
+    ;; Check if voter has already voted
+    (asserts! (is-none voter-vote) err-already-voted)
+
+    ;; Record vote
+    (map-set voter-votes 
+      {proposal-id: proposal-id, voter: tx-sender}
+      {has-voted: true}
+    )
+
+    ;; Update proposal votes
+    (if vote-direction 
+      (map-set proposals 
+        {proposal-id: proposal-id}
+        (merge proposal {votes-for: (+ (get votes-for proposal) u1)})
+      )
+      (map-set proposals 
+        {proposal-id: proposal-id}
+        (merge proposal {votes-against: (+ (get votes-against proposal) u1)})
+      )
+    )
+
+    (ok true)
+  )
+)
+
+
+;; Cancel a proposal
+(define-public (cancel-proposal (proposal-id uint))
+  (let 
+    (
+      (proposal (unwrap! (map-get? proposals {proposal-id: proposal-id}) err-proposal-not-found))
+      (current-block block-height)
+    )
+    ;; Ensure proposal-id is valid
+    (asserts! (< proposal-id (var-get next-proposal-id)) err-invalid-proposal-id)
+
+    ;; Ensure only the proposal creator can cancel
+    (asserts! (is-eq tx-sender (get creator proposal)) err-not-proposal-creator)
+
+    ;; Ensure voting is still open
+    (asserts! (< current-block (get voting-end proposal)) err-voting-closed)
+
+    ;; Ensure proposal is not already cancelled or executed
+    (asserts! (not (get cancelled proposal)) err-proposal-already-cancelled)
+    (asserts! (not (get executed proposal)) err-proposal-not-found)
+
+    ;; Mark proposal as cancelled
+    (map-set proposals 
+      {proposal-id: proposal-id}
+      (merge proposal {cancelled: true})
+    )
+
+    (ok true)
+  )
+)
+
+
+
+;; Execute a proposal
+(define-public (execute-proposal (proposal-id uint))
+  (let 
+    (
+      (proposal (unwrap! (map-get? proposals {proposal-id: proposal-id}) err-proposal-not-found))
+      (current-block block-height)
+    )
+    ;; Ensure proposal-id is valid
+    (asserts! (< proposal-id (var-get next-proposal-id)) err-invalid-proposal-id)
+
+    ;; Ensure voting is closed
+    (asserts! (>= current-block (get voting-end proposal)) err-voting-closed)
+
+    ;; Check if proposal is not cancelled
+    (asserts! (not (get cancelled proposal)) err-proposal-not-found)
+
+    ;; Check if proposal is not already executed
+    (asserts! (not (get executed proposal)) err-proposal-not-found)
+
+    ;; Require a majority of votes
+    (asserts! (> (get votes-for proposal) (get votes-against proposal)) err-insufficient-votes)
+
+    ;; Mark proposal as executed
+    (map-set proposals 
+      {proposal-id: proposal-id}
+      (merge proposal {executed: true})
+    )
+
+    (ok true)
+  )
+)
